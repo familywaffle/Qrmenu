@@ -204,7 +204,7 @@ async function send(){
  if(!lines.length)return er("Sepetiniz boş.");
  try{const r=await addDoc(collection(db,"orders"),{no:Math.floor(1000+Math.random()*9000),name:s.self?nm:"",table:MASA,k:MASA?KEY:"",note,lines,st:"new",t:serverTimestamp()});
   my=r.id;try{sessionStorage.setItem("my",JSON.stringify(my))}catch(e){}
-  cart={};note="";sheet=null;watchOrders();draw();scrollTo({top:0,behavior:"smooth"})}catch(e){er("Sipariş gönderilemedi. Lütfen tekrar deneyin veya kasaya haber verin.")}}
+  cart={};note="";sheet=null;watchOrders();draw();scrollTo({top:0,behavior:"smooth"})}catch(e){er("Sipariş gönderilemedi ("+(e.code||e.message)+"). Lütfen tekrar deneyin veya kasaya haber verin.")}}
 
 function kasa(){
  if(!staff)return login("Kasa");
