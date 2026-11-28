@@ -57,6 +57,7 @@ input[type=color]{height:42px;padding:3px;min-width:90px}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 .qrgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}
 .qrt{text-align:center}.qw{background:#fff;padding:10px;border-radius:10px;margin-bottom:6px}.qw svg{width:100%;height:auto;display:block}
+.rdy{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;color:#fff}.rdy .big{font-size:44px;color:var(--gold)}
 .opt{display:flex;justify-content:space-between;width:100%;background:none;border:1px solid var(--line);border-radius:10px;padding:10px;margin-top:8px;cursor:pointer;text-align:left}.opt.on{border-color:var(--gold);color:var(--gold)}
 .ph[data-zoom]{cursor:zoom-in}
 .lb{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:calc(env(safe-area-inset-top,0px) + 60px) 16px calc(env(safe-area-inset-bottom,0px) + 24px);cursor:zoom-out}
@@ -98,8 +99,9 @@ const dayStart=()=>{const d=new Date();d.setHours(0,0,0,0);return d};
 const mapO=d=>({id:d.id,...d.data(),t:d.data().t?.toMillis?.()||Date.now()});
 function watchOrders(){unsubO&&unsubO();unsubO=null;first=true;
  if(staff)unsubO=onSnapshot(query(collection(db,"orders"),where("t",">=",Timestamp.fromMillis(dayStart().getTime()-6*36e5)),orderBy("t","desc"),limit(1000)),q=>{D.orders=q.docs.map(mapO);if(!first&&q.docChanges().some(c=>c.type=="added"))beep();first=false;draw()},()=>{});
- else if(my)unsubO=onSnapshot(doc(db,"orders",my),d=>{D.orders=d.exists()?[mapO(d)]:[];redraw()},()=>{})}
+ else if(my)unsubO=onSnapshot(doc(db,"orders",my),d=>{const o=d.exists()?mapO(d):null;D.orders=o?[o]:[];if(o){if(lastSt&&lastSt.id==o.id&&lastSt.st!="done"&&o.st=="done")notifyReady(o);lastSt={id:o.id,st:o.st}}redraw()},()=>{})}
 function watchTables(){unsubT&&unsubT();unsubT=null;if(admin)unsubT=onSnapshot(collection(db,"tables"),q=>{D.tables=q.docs.map(d=>({id:d.id,...d.data()}));redraw()},()=>{})}
+if("serviceWorker" in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
 onAuthStateChanged(auth,async u=>{staff=admin=false;D.me=u;
  if(u&&u.emailVerified){const em=(u.email||"").toLowerCase();try{admin=(await getDoc(doc(db,"admins",em))).exists();staff=admin||(await getDoc(doc(db,"staff",em))).exists()}catch(e){}}
  watchOrders();watchTables();if(admin)loadRep();draw()});
@@ -129,6 +131,12 @@ const qrTile=(label,u)=>`<div class="qrt"><div class="qw">${qrSvg(u)}</div><b>${
 const tablesCardT=()=>`<div class="card"><h3>Masalar ve QR kodları</h3><p class="muted">Masa sayısını yazıp oluşturun, sonradan "Masa ekle" ile artırabilirsiniz. Her masanın QR kodu kendine özeldir ve otomatik oluşur.</p><div style="display:flex;gap:8px"><input id="tc" type="number" min="1" max="200" value="${D.tables.length||10}" aria-label="Masa sayısı"><button class="btn" data-mk>Masaları oluştur</button><button class="btn alt" data-at>+ Masa ekle</button></div><div style="margin-top:10px"><button class="btn alt" data-print>QR kodlarını yazdır</button></div></div><div class="card qrsheet"><h3 class="noprint" style="margin-bottom:8px">QR kodları</h3><div class="qrgrid"><div>${qrTile("Genel menü",base)}</div>${[...D.tables].sort((a,b)=>a.id-b.id).map(t=>`<div>${qrTile("Masa "+t.id,base+"?masa="+t.id+"&k="+t.key)}<button class="btn bad noprint" style="width:100%;margin-top:6px" data-dt="${esc(t.id)}">Masayı sil</button></div>`).join("")}</div></div>`;
 const FONTS={elegant:{n:"Şık (klasik)",f:"'Cormorant Garamond',Georgia,serif"},pacifico:{n:"Tatlı el yazısı (Pacifico)",f:"Pacifico,'Brush Script MT',cursive"},lobster:{n:"Eğlenceli (Lobster)",f:"Lobster,'Brush Script MT',cursive"},fredoka:{n:"Yuvarlak neşeli (Fredoka)",f:"Fredoka,'Trebuchet MS',sans-serif"}};
 let osel=null;
+let readyId=null,readyBody="",lastSt=null;const origTitle=document.title;
+async function sysNotify(t,b){try{if(!("Notification" in window)||Notification.permission!=="granted")return;const reg=navigator.serviceWorker&&await Promise.race([navigator.serviceWorker.ready,new Promise(r=>setTimeout(()=>r(null),1500))]);if(reg&&reg.showNotification)await reg.showNotification(t,{body:b,tag:"order-ready",vibrate:[300,150,300],requireInteraction:true});else new Notification(t,{body:b,tag:"order-ready"})}catch(e){}}
+function notifyReady(o){const body=D.s.self?(o.name?o.name+", siparişin hazır! Tezgâhtan alabilirsin.":"Siparişiniz hazır! Tezgâhtan alabilirsiniz."):"Siparişiniz hazır, masanıza getiriliyor.";
+ readyId=o.id;readyBody=body;beep(true);setTimeout(()=>beep(true),2400);navigator.vibrate&&navigator.vibrate([300,150,300,150,600]);document.title="🔔 Siparişiniz hazır!";
+ if(document.hidden)sysNotify((D.s.title||"Sipariş")+" · Siparişiniz hazır",body);draw()}
+const readyView=()=>`<div class="rdy"><div style="font-size:64px">🎉</div><div class="big">Siparişiniz hazır!</div><div style="font-size:20px;max-width:30ch">${esc(readyBody)}</div><button class="btn" style="margin-top:10px" data-rdy>Tamam</button></div>`;
 const allOpts=i=>{const own=i.opts||[],nm=own.map(g=>g.name).filter(Boolean),co=(D.cats.find(c=>c.id==i.c)?.opts||[]).filter(g=>!nm.includes(g.name));return[...co,...own]};
 const og=i=>allOpts(i).map(g=>({...g,choices:(g.choices||[]).filter(c=>c.n)})).filter(g=>g.name&&g.choices.length);
 const ckey=(id,o)=>id+"|"+o.map(x=>x.g+":"+x.n).join(",");
@@ -199,7 +207,7 @@ function menu(){
 function mine(){const o=D.orders.find(o=>o.id==my);if(!o)return"";
  const st={new:"Siparişiniz alındı",preparing:"Siparişiniz hazırlanıyor",done:D.s.self?"Siparişiniz hazır! İsminiz çağrılıyor":"Siparişiniz masanıza getiriliyor",cancelled:"Siparişiniz iptal edildi"}[o.st]||"";
  const left=60-(Date.now()-o.t)/1000,can=o.st=="new"&&left>0;
- return `<div class="card" style="border-color:var(--gold)"><div class="muted">Sipariş #${esc(o.no)}${who(o)?" · "+who(o):""}</div><div class="big">${st}</div>${lineList(o).map(l=>`<div class="row" style="padding:2px 0"><span>${l.q} × ${esc(l.n)}${l.o.length?`<br><small class="muted">${l.o.map(x=>esc(x)).join(", ")}</small>`:""}</span><span>${tl(l.q*l.p)}</span></div>`).join("")}<div class="row" style="border-top:1px solid var(--line)"><b>Toplam</b><b>${tl(ototal(o))}</b></div>${can?`<p class="muted">Yanlış sipariş mi? İptal veya değiştirme için <b id="cd">${Math.ceil(left)}</b> saniyen var.</p><div style="display:flex;gap:10px"><button class="btn bad" data-cancel>İptal et</button><button class="btn alt" data-edit>Değiştir</button></div>`:(o.st=="done"||o.st=="cancelled"?`<button class="btn alt" data-clear>Yeni sipariş ver</button>`:"")}</div>`}
+ return `<div class="card" style="border-color:var(--gold)"><div class="muted">Sipariş #${esc(o.no)}${who(o)?" · "+who(o):""}</div><div class="big">${st}</div>${lineList(o).map(l=>`<div class="row" style="padding:2px 0"><span>${l.q} × ${esc(l.n)}${l.o.length?`<br><small class="muted">${l.o.map(x=>esc(x)).join(", ")}</small>`:""}</span><span>${tl(l.q*l.p)}</span></div>`).join("")}<div class="row" style="border-top:1px solid var(--line)"><b>Toplam</b><b>${tl(ototal(o))}</b></div>${(o.st=="new"||o.st=="preparing")&&"Notification" in window&&Notification.permission=="default"?`<button class="btn alt" style="margin-top:8px" data-notif>🔔 Hazır olunca bana bildirim gönder</button>`:""}${can?`<p class="muted">Yanlış sipariş mi? İptal veya değiştirme için <b id="cd">${Math.ceil(left)}</b> saniyen var.</p><div style="display:flex;gap:10px"><button class="btn bad" data-cancel>İptal et</button><button class="btn alt" data-edit>Değiştir</button></div>`:(o.st=="done"||o.st=="cancelled"?`<button class="btn alt" data-clear>Yeni sipariş ver</button>`:"")}</div>`}
 function cartSheet(){
  const s=D.s;let rows=Object.entries(cart).map(([k,l])=>{const i=D.items.find(x=>x.id==l.id);return i?`<div class="row" style="align-items:center"><div style="flex:1"><div>${esc(i.n)}</div>${l.o.length?`<div class="muted" style="font-size:13px">${l.o.map(x=>esc(x.n)).join(", ")}</div>`:""}</div><div class="qty"><button data-m="${esc(k)}" aria-label="Azalt">−</button><b>${l.q}</b><button data-a="${esc(k)}" aria-label="Artır">+</button></div><b style="min-width:64px;text-align:right">${tl(l.q*unit(l))}</b></div>`:""}).join("");
  return `<div class="sheet" data-close><div><h2 style="font-size:30px">Siparişiniz</h2>${rows}<div class="row" style="border-top:1px solid var(--line);margin-top:6px"><span>Toplam</span><b class="big" style="font-size:26px">${tl(total())}</b></div>
@@ -239,8 +247,8 @@ function yon(){
  h+=`<button class="btn" data-ai>+ Ürün ekle</button></div>`;return h}
 function login(t){const u=D.me;return `<div class="wrap" style="text-align:center;padding-top:70px"><h2 style="font-size:36px">${t} girişi</h2><p class="muted">Yalnızca işletmenin yetkili Google hesapları girebilir.</p>${u?`<p style="color:var(--bad)">${esc(u.email)} hesabının bu sayfaya yetkisi yok.</p><button class="btn alt" data-out>Çıkış yap</button>`:`<button class="btn" data-login>Google ile giriş yap</button>`}</div>`}
 
-function draw(){applyTheme();applyBg();navr();const r=route();$("#app").innerHTML=(r=="kasa"?kasa():r=="yonetim"?yon():menu())+(sheet=="cart"?cartSheet():"")+(sheet=="opt"?optSheet():"")+(zoom?zoomView():"");window.scrollTo&&0}
-document.addEventListener("click",async e=>{const t=e.target.closest("[data-zoom],[data-zx],[data-a],[data-m],[data-tab],[data-go],[data-x],[data-send],[data-oi],[data-oc],[data-oadd],[data-xg],[data-xd],[data-xa],[data-xr],[data-xo],[data-snd],[data-test],[data-rcp],[data-act],[data-cancel],[data-edit],[data-clear],[data-at],[data-dt],[data-print],[data-rep],[data-login],[data-out],[data-so],[data-di],[data-ai],[data-ac],[data-dc],[data-close],[data-pal],[data-seed],[data-reseed],[data-dl],[data-ri],[data-mk]");if(!t)return;
+function draw(){applyTheme();applyBg();navr();const r=route();$("#app").innerHTML=(r=="kasa"?kasa():r=="yonetim"?yon():menu())+(sheet=="cart"?cartSheet():"")+(sheet=="opt"?optSheet():"")+(zoom?zoomView():"")+(readyId?readyView():"");window.scrollTo&&0}
+document.addEventListener("click",async e=>{const t=e.target.closest("[data-notif],[data-rdy],[data-zoom],[data-zx],[data-a],[data-m],[data-tab],[data-go],[data-x],[data-send],[data-oi],[data-oc],[data-oadd],[data-xg],[data-xd],[data-xa],[data-xr],[data-xo],[data-snd],[data-test],[data-rcp],[data-act],[data-cancel],[data-edit],[data-clear],[data-at],[data-dt],[data-print],[data-rep],[data-login],[data-out],[data-so],[data-di],[data-ai],[data-ac],[data-dc],[data-close],[data-pal],[data-seed],[data-reseed],[data-dl],[data-ri],[data-mk]");if(!t)return;
  const d=t.dataset;if(d.close!==undefined&&e.target!==t)return;
  try{
  if(d.zoom){zoom=d.zoom}
@@ -270,6 +278,8 @@ document.addEventListener("click",async e=>{const t=e.target.closest("[data-zoom
  else if(d.clear!==undefined)clearMine();
  else if(d.at!==undefined)await addTable();
  else if(d.dt){if(confirm("Masa "+d.dt+" silinsin mi? Bu masanın QR kodu çalışmaz olur."))await deleteDoc(doc(db,"tables",d.dt))}
+ else if(d.notif!==undefined){try{await Notification.requestPermission()}catch(e){}}
+ else if(d.rdy!==undefined){readyId=null;document.title=origTitle}
  else if(d.ri){if(confirm("Bu ürünün fotoğrafı silinsin mi?"))await updateDoc(doc(db,"items",d.ri),{img:deleteField()})}
  else if(d.dl!==undefined){dlQR();return}
  else if(d.print!==undefined){printQRs();return}
